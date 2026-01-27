@@ -24,22 +24,28 @@ public class _TeleOpBlue_ extends LinearOpMode{
 
     Servo Aimer;
 
-    PIDFCoefficients PIDF = new PIDFCoefficients(550, 1.5, 0, 19);
+    public double P = 100000;
+
+    public double F = 3100;
+
+    PIDFCoefficients PIDF = new PIDFCoefficients(P, 0, 0, F);
 
     /*
      * Launch speed and servo aiming was determined quasi-empirically.
      *
-     *   POINT       LAUNCHER        SERVO       DISTANCE TO TARGET
-     *   (+00;+00)   2830            0.5         101.823
-     *   (-12;-12)   2650            0.25        084.853
-     *   (-24;-24)   2500            0           067.882
+     *  +---------------+---------------+-----------+-----------------------+
+     *  |     POINT     |   LAUNCHER    |   SERVO   |   DISTANCE TO TARGET  |
+     *  +---------------+---------------+-----------+-----------------------+
+     *  |   (+00;+00)   |   2850        |   0.5     |   101.823             |
+     *  |   (-12;-12)   |   2650        |   0       |   84.853              |
+     *  |   (-24;-24)   |   2350        |   0       |   67.882              |
+     *  +---------------+---------------+-----------+-----------------------+
      *
      * Position for blue target: (-72;-72).
      *
-     * Launcher function: y = 0.0521006 x^2 + 0.881022 x + 2200.11667
+     * Launcher function: y = 7.36572 x + 1999.99877
      *
      * Aimer function: y = 0.0147314 x - 1
-     *
      * */
 
     @Override
@@ -58,12 +64,13 @@ public class _TeleOpBlue_ extends LinearOpMode{
         GoBildaLauncher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         GoBildaLauncher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, PIDF);
 
+        /*
         REVLauncher = hardwareMap.get(DcMotorEx.class, "REVLauncher");
         REVLauncher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
         REVLauncher.setDirection(DcMotorSimple.Direction.REVERSE);
         REVLauncher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         REVLauncher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, PIDF);
-
+         */
         /*
         * All intake motors go counterclockwise.
         * */
@@ -83,11 +90,15 @@ public class _TeleOpBlue_ extends LinearOpMode{
 
         base.updatePoseEstimate();
 
-        double LaunchVelocity = 0;
+        double LaunchVelocity;
 
-        double Distance_Target = 0;
+        double Distance_Target;
 
-        double ServoAngle = 0;
+        double ServoAngle;
+
+        final double LinearScalar = 1;
+
+        final double AngularScalar = 1;
 
         waitForStart();
 
@@ -95,17 +106,29 @@ public class _TeleOpBlue_ extends LinearOpMode{
 
         while (opModeIsActive() & !isStopRequested()){
 
+            /*
+            * Rotation matrix:
+            *
+            *   +---             ---+
+            *   |  +cos a   -sin a  |
+            *   |                   |
+            *   |  +sin a   +cos a  |
+            *   +---             ---+
+            *
+            * Applied to the vector we will obtain a rotated matrix, for now this is rather rudimentary.
+            * */
+
             Vector2d Motion = new Vector2d(
-                    -gamepad1.left_stick_y * Math.cos(Math.toRadians(base.localizer.getPose().heading.toDouble()))
-                    - gamepad1.left_stick_y * Math.sin(Math.toRadians(base.localizer.getPose().heading.toDouble())),
-                    -gamepad1.left_stick_x * (-Math.sin(Math.toRadians(base.localizer.getPose().heading.toDouble())))
-                    - gamepad1.left_stick_x * Math.cos(Math.toRadians(base.localizer.getPose().heading.toDouble()))
+                    (-gamepad1.left_stick_y)
+                    * LinearScalar,
+                    (-gamepad1.left_stick_x)
+                    * LinearScalar
             );
 
             base.setDrivePowers(
                     new PoseVelocity2d(
                             Motion,
-                            - gamepad1.right_stick_x
+                            - gamepad1.right_stick_x * AngularScalar
                     )
             );
 
@@ -113,8 +136,8 @@ public class _TeleOpBlue_ extends LinearOpMode{
 
             telemetry.addData("x", base.localizer.getPose().position.x);
             telemetry.addData("y", base.localizer.getPose().position.y);
-            telemetry.addData("h", base.localizer.getPose().heading);
-            telemetry.addData("REVLaunchSpeed", 28 * REVLauncher.getVelocity() / 60);
+            telemetry.addData("h", base.localizer.getPose().heading.toDouble());
+            //telemetry.addData("REVLaunchSpeed", 28 * REVLauncher.getVelocity() / 60);
             telemetry.addData("GBDLaunchSpeed", 28 * GoBildaLauncher.getVelocity() / 60);
 
             //TARGET LOCATION IS AT (-72;-72).
@@ -122,7 +145,9 @@ public class _TeleOpBlue_ extends LinearOpMode{
             Distance_Target = Math.sqrt(Math.pow(base.localizer.getPose().position.x + 72, 2)
                     + Math.pow(base.localizer.getPose().position.y + 72, 2));
 
-            LaunchVelocity = 0.0521006 * Math.pow(Distance_Target, 2) + 0.881022 * Distance_Target + 2200.11667;
+            //FUNCTION GENERATED BY QUADRATIC REGRESSION.
+
+            LaunchVelocity = 8.83887 * Distance_Target + 1599.99853;
 
             ServoAngle = 0.0147314 * Distance_Target - 1;
 
@@ -146,14 +171,14 @@ public class _TeleOpBlue_ extends LinearOpMode{
                 REVLoader.setPower(0);
             }
             if (gamepad1.a){
-                REVLauncher.setVelocity((-LaunchVelocity / 60.0) * 28);
+                //REVLauncher.setVelocity((-LaunchVelocity / 60.0) * 28);
                 GoBildaLauncher.setVelocity((-LaunchVelocity / 60.0) * 28);
             }
-            if (gamepad1.left_trigger != 0){
-                REVLauncher.setVelocity((LaunchVelocity / 60.0) * 28);
+            else if (gamepad1.left_trigger != 0){
+                //REVLauncher.setVelocity((LaunchVelocity / 60.0) * 28);
                 GoBildaLauncher.setVelocity((LaunchVelocity / 60.0) * 28);
             } else {
-                REVLauncher.setVelocity(0);
+                //REVLauncher.setVelocity(0);
                 GoBildaLauncher.setVelocity(0);
             }
             if (gamepad2.left_stick_x < 0){
@@ -165,11 +190,6 @@ public class _TeleOpBlue_ extends LinearOpMode{
             } else {
                 C1.setPower(0);
                 C2.setPower(0);
-            }
-            if (gamepad2.right_trigger != 0){
-                Aimer.setPosition(0);
-            } else if (gamepad2.right_bumper){
-                Aimer.setPosition(1);
             }
             telemetry.update();
         }

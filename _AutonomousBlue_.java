@@ -22,52 +22,94 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import java.util.concurrent.TimeUnit;
 
 /*
-*
 * Before anything, we have a few notes:
 *
 * Positive direction is clockwise from the perspective opposite to the motor axially.
 *
 * We are using REV 41 and GoBilda 5203 for the launcher because we are out of resources.
 *
-* Latest measurement gives 12150 ticks per 23.8125 in, for our tiles are not perfect.
+* Both motor types count 28 ticks per revolution.
 *
+* Latest measurement gives 12150 ticks per 23.8125 in, for our tiles are not perfect.
 * */
 
 @Autonomous(name = "BLUE")
 public class _AutonomousBlue_ extends LinearOpMode{
 
-    public static class Intake{
-        private final DcMotorEx GoBildaLauncher, REVLauncher;
-        private final DcMotor GoBilda3_Intake;
-        private final DcMotor REV_Loader;
+    public static class ArtefactHandler{
+
+        private final DcMotorEx REVLauncherR, REVLauncherL;
+        private final DcMotor REVLoader, GoBildaIntake;
+        Servo Aimer;
+        double LaunchSpeed = 2500;
+
+        /*
+        * Launch speed and servo aiming was determined quasi-empirically.
+        *
+        *  +---------------+---------------+-----------+-----------------------+
+        *  |     POINT     |   LAUNCHER    |   SERVO   |   DISTANCE TO TARGET  |
+        *  +---------------+---------------+-----------+-----------------------+
+        *  |   (+00;+00)   |   2850        |   0.5     |   101.823             |
+        *  |   (-12;-12)   |   2650        |   0       |   84.853              |
+        *  |   (-24;-24)   |   2350        |   0       |   67.882              |
+        *  +---------------+---------------+-----------+-----------------------+
+        *
+        * Position for blue target: (-72;-72).
+        *
+        * Launcher function: y = 0.0521006 x^2 + 0.881022 x + 2200.11667
+        *
+        * Aimer function: y = -0.000173587 x^2 + 0.04419 x - 2.19982
+        *
+        * Each field tile is 24in by 24in.
+        *
+        * Launch lines: x = |y| + 48 and x = -|y|.
+        * */
+
         public double TPR = 28;
 
-        public Intake(HardwareMap hardwareMap){
-            //Launcher will help push the artefacts downwards so they will not get stuck.
-            GoBildaLauncher = hardwareMap.get(DcMotorEx.class, "GoBildaLauncher");
-            GoBildaLauncher.setDirection(DcMotorSimple.Direction.FORWARD);
-            GoBildaLauncher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-            GoBildaLauncher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-            REVLauncher = hardwareMap.get(DcMotorEx.class, "REVLauncher");
-            REVLauncher.setDirection(DcMotorSimple.Direction.REVERSE);
-            REVLauncher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-            REVLauncher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-            //Basic intake with rubber bands for friction.
-            GoBilda3_Intake = hardwareMap.get(DcMotor.class, "GoBildaIntake");
-            GoBilda3_Intake.setDirection(DcMotorSimple.Direction.REVERSE);
-            GoBilda3_Intake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-            REV_Loader = hardwareMap.get(DcMotor.class, "REVLoader");
-            REV_Loader.setDirection(DcMotorSimple.Direction.REVERSE);
-            REV_Loader.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+        //Overclocking time!
+        PIDFCoefficients PIDF = new PIDFCoefficients(1000000, 1, 0, 19);
+
+        private final ElapsedTime timer = new ElapsedTime(ElapsedTime.Resolution.MILLISECONDS);
+
+        public ArtefactHandler (HardwareMap hardwareMap){
+            REVLauncherR = hardwareMap.get(DcMotorEx.class, "REVR");
+            REVLauncherR.setDirection(DcMotorSimple.Direction.FORWARD);
+            REVLauncherR.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+            REVLauncherR.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+            REVLauncherR.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, PIDF);
+            REVLauncherL = hardwareMap.get(DcMotorEx.class, "REVL");
+            REVLauncherL.setDirection(DcMotorSimple.Direction.REVERSE);
+            REVLauncherL.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+            REVLauncherL.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+            REVLauncherL.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, PIDF);
+
+            GoBildaIntake = hardwareMap.get(DcMotor.class, "GoBildaIntake");
+            GoBildaIntake.setDirection(DcMotorSimple.Direction.REVERSE);
+            GoBildaIntake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+            REVLoader = hardwareMap.get(DcMotor.class, "REVTransfer");
+            REVLoader.setDirection(DcMotorSimple.Direction.REVERSE);
+            REVLoader.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+
+            Aimer = hardwareMap.get(Servo.class, "Hood");
+            Aimer.setPosition(0);
         }
+
+        /*
+        * Both GoBilda and REV have their motors running on 28 ticks each revolution.
+        * Desired speed in rotation per minute will be divided by 60 to get per second rotation.
+        * Multiply that with 28 we have the desired angular speed.
+        * */
+
+        //INTAKE.
 
         public class Take_Artefact implements Action {
             @Override
             public boolean run(@NonNull TelemetryPacket telemetry){
-                GoBilda3_Intake.setPower(1);
-                REV_Loader.setPower(0.35);
-                GoBildaLauncher.setVelocity((-1100.0 / 60.0) * TPR);
-                REVLauncher.setVelocity((-1100.0 / 60.0) * TPR);
+                GoBildaIntake.setPower(1);
+                REVLoader.setPower(0.35);
+                REVLauncherR.setVelocity((-1100.0 / 60.0) * TPR);
+                REVLauncherL.setVelocity((-1100.0 / 60.0) * TPR);
                 return false;
             }
         }
@@ -78,8 +120,8 @@ public class _AutonomousBlue_ extends LinearOpMode{
         public class Discard_Artefact implements Action {
             @Override
             public boolean run(@NonNull TelemetryPacket telemetry){
-                GoBilda3_Intake.setPower(-1);
-                REV_Loader.setPower(-0.79);
+                GoBildaIntake.setPower(-1);
+                REVLoader.setPower(-0.79);
                 return false;
             }
         }
@@ -90,92 +132,25 @@ public class _AutonomousBlue_ extends LinearOpMode{
         public class Keep_Artefact implements Action {
             @Override
             public boolean run(@NonNull TelemetryPacket telemetry){
-                GoBilda3_Intake.setPower(0);
-                REV_Loader.setPower(0);
+                GoBildaIntake.setPower(0);
+                REVLoader.setPower(0);
                 return false;
             }
         }
         public Action keepArtefact(){
             return new Keep_Artefact();
         }
-    }
 
-    public static class Turret{
-
-        private final DcMotorEx GoBildaLauncher, REVLauncher;
-        private final DcMotor REVLoader, GoBildaIntake;
-        Servo Aimer;
-        double LaunchSpeed = 2500;
-
-        /*
-        * Launch speed and servo aiming was determined quasi-empirically.
-        *
-        *   POINT       LAUNCHER        SERVO       DISTANCE TO TARGET
-        *   (+00;+00)   2830            0.5         101.823
-        *   (-12;-12)   2650            0.25        084.853
-        *   (-24;-24)   2500            0           067.882
-        *
-        * Position for blue target: (-72;-72).
-        *
-        * Launcher function: y = 0.0521006 x^2 + 0.881022 x + 2200.11667
-        *
-        * Aimer function: y = 0.0147314 x - 1
-        *
-        * Each field tile is 24in by 24in.
-        *
-        * Two launch locations: (-24;-24) and (+60;-12)
-        *
-        * Launch lines: x = |y| + 48 and x = -|y|.
-        *
-        * Two launch locations:
-        *
-        * POINT         DISTANCE        LAUNCHER        AIMER
-        * (-24;-24)     067.882         2500            0
-        * (+60;-12)     144.996         3425            1
-        * */
-
-        public double TPR = 28;
-        PIDFCoefficients PIDF = new PIDFCoefficients(300, 0.5, 0, 19);
-
-        private final ElapsedTime timer = new ElapsedTime(ElapsedTime.Resolution.MILLISECONDS);
-
-        public Turret (HardwareMap hardwareMap){
-            GoBildaLauncher = hardwareMap.get(DcMotorEx.class, "GoBildaLauncher");
-            GoBildaLauncher.setDirection(DcMotorSimple.Direction.FORWARD);
-            GoBildaLauncher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-            GoBildaLauncher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-            GoBildaLauncher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, PIDF);
-            REVLauncher = hardwareMap.get(DcMotorEx.class, "REVLauncher");
-            REVLauncher.setDirection(DcMotorSimple.Direction.REVERSE);
-            REVLauncher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-            REVLauncher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-            REVLauncher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, PIDF);
-
-            GoBildaIntake = hardwareMap.get(DcMotor.class, "GoBildaIntake");
-            GoBildaIntake.setDirection(DcMotorSimple.Direction.REVERSE);
-            GoBildaIntake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-            REVLoader = hardwareMap.get(DcMotor.class, "REVLoader");
-            REVLoader.setDirection(DcMotorSimple.Direction.REVERSE);
-            REVLoader.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
-
-            Aimer = hardwareMap.get(Servo.class, "ServoAimer");
-            Aimer.setPosition(0);
-        }
-
-        /*
-        * Both GoBilda and REV have their motors running on 28 ticks each revolution.
-        * Desired speed in rotation per minute will be divided by 60 to get per second rotation.
-        * Multiply that with 28 we have the desired angular speed.
-        * */
+        //TURRET.
 
         public class Spool_Up implements Action {
             @Override
             public boolean run(@NonNull TelemetryPacket telemetry){
                 Aimer.setPosition(0);
-                GoBildaLauncher.setVelocity((LaunchSpeed / 60) * TPR);
-                REVLauncher.setVelocity((LaunchSpeed / 60) * TPR);
+                REVLauncherR.setVelocity((LaunchSpeed / 60) * TPR);
+                REVLauncherL.setVelocity((LaunchSpeed / 60) * TPR);
                 //Here a tolerance of 10 ticks will be allowed because we have had enough.
-                return (GoBildaLauncher.getVelocity() + REVLauncher.getVelocity()) / 2 < (LaunchSpeed / 60) * TPR - 10;
+                return (REVLauncherR.getVelocity() + REVLauncherL.getVelocity()) < (LaunchSpeed / 60) * TPR - 10;
             }
         }
         public Action spoolUp() {
@@ -190,7 +165,7 @@ public class _AutonomousBlue_ extends LinearOpMode{
                     timer.reset();
                     init = true;
                 }
-                GoBildaIntake.setPower(0.78);
+                GoBildaIntake.setPower(1);
                 REVLoader.setPower(1);
                 return timer.time(TimeUnit.MILLISECONDS) < 1300;
             }}
@@ -207,10 +182,10 @@ public class _AutonomousBlue_ extends LinearOpMode{
                     timer.reset();
                     init = true;
                 }
-                GoBildaLauncher.setVelocity(0);
-                REVLauncher.setVelocity(0);
-                GoBildaLauncher.setPower(0);
-                REVLauncher.setPower(0);
+                REVLauncherR.setVelocity(0);
+                REVLauncherL.setVelocity(0);
+                REVLauncherR.setPower(0);
+                REVLauncherL.setPower(0);
                 GoBildaIntake.setPower(0);
                 REVLoader.setPower(0);
                 return timer.time(TimeUnit.MILLISECONDS) < 500;
@@ -229,8 +204,7 @@ public class _AutonomousBlue_ extends LinearOpMode{
     public void runOpMode() throws InterruptedException{
         Pose2d Location = new Pose2d(-61, -6, Math.toRadians(0));
         MecanumDrive Base = new MecanumDrive(hardwareMap, Location);
-        Intake intake = new Intake(hardwareMap);
-        Turret launcher = new Turret(hardwareMap);
+        ArtefactHandler artefactHandler = new ArtefactHandler(hardwareMap);
         waitForStart();
         Action Path1 = Base.actionBuilder(Location)
                 .strafeToSplineHeading(new Vector2d(-24, -24), Math.toRadians(225))
@@ -260,75 +234,79 @@ public class _AutonomousBlue_ extends LinearOpMode{
                 .strafeTo(new Vector2d(36, -52))
                 .build();
         Action PathA = Base.actionBuilder(new Pose2d(36, -52, Math.toRadians(270)))
-                .strafeToSplineHeading(new Vector2d(-24, -24), Math.toRadians(216))
+                .strafeToSplineHeading(new Vector2d(-24, -24), Math.toRadians(220))
+                .build();
+        Action PathB = Base.actionBuilder(new Pose2d(-24, -24, Math.toRadians(220)))
+                .strafeToSplineHeading(new Vector2d(0, -24), Math.toRadians(0))
                 .build();
 
         ParallelAction Spool1 = new ParallelAction(
                 Path1,
-                launcher.spoolUp()
+                artefactHandler.spoolUp()
         );
         ParallelAction Defer2 = new ParallelAction(
                 Path2,
-                intake.discardArtefact()
+                artefactHandler.discardArtefact()
         );
         ParallelAction Refer3 = new ParallelAction(
                 Path3,
-                intake.takeArtefact()
+                artefactHandler.takeArtefact()
         );
         ParallelAction Spool4 = new ParallelAction(
                 Path4,
-                launcher.spoolUp(),
-                intake.keepArtefact()
+                artefactHandler.spoolUp(),
+                artefactHandler.keepArtefact()
         );
         ParallelAction Defer5 = new ParallelAction(
                 Path5,
-                intake.discardArtefact()
+                artefactHandler.discardArtefact()
         );
         ParallelAction Refer6 = new ParallelAction(
                 Path6,
-                intake.takeArtefact()
+                artefactHandler.takeArtefact()
         );
         ParallelAction Spool7 = new ParallelAction(
                 Path7,
-                launcher.spoolUp(),
-                intake.keepArtefact()
+                artefactHandler.spoolUp(),
+                artefactHandler.keepArtefact()
         );
         ParallelAction Defer8 = new ParallelAction(
                 Path8,
-                intake.discardArtefact()
+                artefactHandler.discardArtefact()
         );
         ParallelAction Refer9 = new ParallelAction(
                 Path9,
-                intake.takeArtefact()
+                artefactHandler.takeArtefact()
         );
         ParallelAction SpoolA = new ParallelAction(
                 PathA,
-                launcher.spoolUp(),
-                intake.keepArtefact()
+                artefactHandler.spoolUp(),
+                artefactHandler.keepArtefact()
         );
 
         SequentialAction Blue = new SequentialAction(
                 Spool1,
-                launcher.launchArtefact(),
-                launcher.halt(),
+                artefactHandler.launchArtefact(),
+                artefactHandler.halt(),
                 Defer2,
                 Refer3,
-                intake.keepArtefact(),
+                artefactHandler.keepArtefact(),
                 Spool4,
-                launcher.launchArtefact(),
-                launcher.halt(),
+                artefactHandler.launchArtefact(),
+                artefactHandler.halt(),
                 Defer5,
                 Refer6,
-                intake.keepArtefact(),
+                artefactHandler.keepArtefact(),
                 Spool7,
-                launcher.launchArtefact(),
-                launcher.halt(),
+                artefactHandler.launchArtefact(),
+                artefactHandler.halt(),
                 Defer8,
                 Refer9,
-                intake.keepArtefact(),
+                artefactHandler.keepArtefact(),
                 SpoolA,
-                launcher.launchArtefact(),
-                launcher.halt()
+                artefactHandler.launchArtefact(),
+                artefactHandler.halt(),
+                PathB
         );
 
         Actions.runBlocking(Blue);
