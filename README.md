@@ -2,6 +2,29 @@ FTC Team <strong>33516</strong>'s code, available for public use since this is r
 
 <hr>
 Built based on <i>RoadRunner</i>, thus to use the code, <mark>Gradle needs reconfiguration</mark>.
+<h1>Version 0.1.1.</h1>
+
+<pre>
+  +---Class ArtefactHandler:
+          +-function takeArtefact:
+          |    Power intake motors to take in artefact while spinning launching flywheel backwards.
+          +-function keepArtefact:
+          |    Stop all intake motors.
+          +-function discardArtefact:
+          |    Spin intake motors backwards.
+          +-function spoolUp:
+          |    Power up launcher motors until reaching set velocity.
+          +-function launchArtefact:
+          |    Power up intake motors while launcher motors run.
+          +-function Halt:
+               Stop all motors involved in launching artefacts.
+</pre>
+<br>
+All features remain similar.
+Launching now done in intervals.
+Expanded to various situations.
+
+<hr>
 
 <h1>Version 0.1.0.</h1>
   <pre>
